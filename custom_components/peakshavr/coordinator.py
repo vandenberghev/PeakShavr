@@ -15,6 +15,8 @@ from homeassistant.const import (
     SERVICE_TURN_ON,
     STATE_OFF,
     STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
 )
 from homeassistant.core import Event, EventStateChangedData, EventStateReportedData, HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -145,6 +147,111 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
     @property
     def external_overrides(self) -> list[str]:
         return sorted(self._external_overrides)
+
+    @property
+    def load_configs(self) -> tuple[LoadConfig, ...]:
+        """Configured managed loads."""
+        return self._runtime_config.loads
+
+    def get_load_config(self, entity_id: str) -> LoadConfig | None:
+        """Get one managed load config by entity id."""
+        for load in self._runtime_config.loads:
+            if load.entity_id == entity_id:
+                return load
+        return None
+
+    def load_device_name(self, entity_id: str) -> str:
+        """Resolve a friendly per-load device name."""
+        state = self.hass.states.get(entity_id)
+        if state is not None and state.name:
+            return state.name
+        return entity_id
+
+    def load_state(self, entity_id: str) -> str | None:
+        """Return managed load state string."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        return state.state
+
+    def load_is_on(self, entity_id: str) -> bool:
+        """Return whether managed load is currently ON."""
+        return self.load_state(entity_id) == STATE_ON
+
+    def load_is_available(self, entity_id: str) -> bool:
+        """Return whether managed load state is available."""
+        state = self.load_state(entity_id)
+        return bool(
+            state is not None and state not in (STATE_UNKNOWN, STATE_UNAVAILABLE, "")
+        )
+
+    def is_load_shed(self, entity_id: str) -> bool:
+        """Return whether the controller currently tracks this load as shed."""
+        return entity_id in self._shed_stack
+
+    def is_load_external_override(self, entity_id: str) -> bool:
+        """Return whether load is currently in external override list."""
+        return entity_id in self._external_overrides
+
+    def load_live_kw(self, entity_id: str) -> float | None:
+        """Live measured load draw from its configured load power sensor."""
+        load = self.get_load_config(entity_id)
+        if load is None or not load.power_sensor:
+            return None
+        value = power_state_to_kw(self.hass.states.get(load.power_sensor))
+        if value is None:
+            return None
+        return max(0.0, value)
+
+    def load_expected_kw(self, entity_id: str) -> float | None:
+        """Expected load draw used by controller decisions."""
+        load = self.get_load_config(entity_id)
+        if load is None:
+            return None
+        return self._resolve_expected_kw(load)
+
+    def load_threshold_reference_kw(self, entity_id: str) -> float | None:
+        """Draw used for minimum-threshold comparison."""
+        live_kw = self.load_live_kw(entity_id)
+        if live_kw is not None:
+            return live_kw
+        return self.load_expected_kw(entity_id)
+
+    def load_blocked_by_threshold(self, entity_id: str) -> bool:
+        """Return whether shedding is blocked by minimum draw threshold."""
+        if self._escalation_active:
+            return False
+        load = self.get_load_config(entity_id)
+        if load is None or load.min_required_kw is None:
+            return False
+        reference_kw = self.load_threshold_reference_kw(entity_id)
+        if reference_kw is None:
+            # Safety-first fallback: if no draw reference can be resolved, do not block shedding.
+            return False
+        return reference_kw < load.min_required_kw
+
+    async def async_user_control_load(self, entity_id: str, *, turn_on: bool) -> None:
+        """Allow user-facing proxy entities to control a managed load."""
+        if self.get_load_config(entity_id) is None:
+            _LOGGER.warning("Ignoring user control for unmanaged load entity: %s", entity_id)
+            return
+
+        await self._async_call_load_service(entity_id, turn_on=turn_on)
+        now = dt_util.utcnow()
+        if turn_on:
+            if entity_id in self._shed_stack:
+                self._shed_stack = [item for item in self._shed_stack if item != entity_id]
+                self._last_restore_at[entity_id] = now
+                self._override_backoff_until[entity_id] = now + timedelta(
+                    seconds=self._runtime_config.override_backoff_seconds
+                )
+                self._external_overrides.add(entity_id)
+            self._last_action = f"user turned on {entity_id}"
+        else:
+            self._last_action = f"user turned off {entity_id}"
+
+        await self._async_save_state()
+        self.async_set_updated_data(None)
 
     async def async_initialize(self) -> None:
         """Initialize runtime and register listeners."""
@@ -548,6 +655,7 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
                 and not self._escalation_active
             ):
                 blocked_by_min_on_time = True
+            blocked_by_min_required_draw = self.load_blocked_by_threshold(load.entity_id)
 
             candidates.append(
                 ShedCandidate(
@@ -555,6 +663,7 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
                     priority=load.priority,
                     expected_kw=self._resolve_expected_kw(load),
                     blocked_by_min_on_time=blocked_by_min_on_time,
+                    blocked_by_min_required_draw=blocked_by_min_required_draw,
                 )
             )
 

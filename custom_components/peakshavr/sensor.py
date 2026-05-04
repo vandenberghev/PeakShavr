@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, NAME
 from .coordinator import PeakShavrCoordinator
+from .entity_helpers import load_device_info, load_key
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -68,6 +69,10 @@ async def async_setup_entry(
         PeakShavrSensor(coordinator, entry, description) for description in SENSOR_DESCRIPTIONS
     ]
     entities.append(PeakShavrLastActionSensor(coordinator, entry))
+    entities.extend(
+        PeakShavrLoadCurrentDrawSensor(coordinator, entry, load.entity_id)
+        for load in coordinator.load_configs
+    )
     async_add_entities(entities)
 
 
@@ -135,3 +140,51 @@ class PeakShavrLastActionSensor(CoordinatorEntity[PeakShavrCoordinator], SensorE
     def extra_state_attributes(self) -> dict[str, Any]:
         return self.coordinator.extra_state_attributes()
 
+
+class PeakShavrLoadCurrentDrawSensor(
+    CoordinatorEntity[PeakShavrCoordinator], SensorEntity
+):
+    """Diagnostic sensor exposing current per-load power draw."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Current draw"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_suggested_display_precision = 2
+
+    def __init__(
+        self,
+        coordinator: PeakShavrCoordinator,
+        entry: ConfigEntry,
+        load_entity_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._load_entity_id = load_entity_id
+        self._attr_unique_id = f"{entry.entry_id}_{load_key(load_entity_id)}_current_draw_kw"
+        self._attr_device_info = load_device_info(coordinator, entry, load_entity_id)
+
+    @property
+    def native_value(self) -> float | None:
+        return self.coordinator.load_live_kw(self._load_entity_id)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        load = self.coordinator.get_load_config(self._load_entity_id)
+        return {
+            "managed_entity_id": self._load_entity_id,
+            "priority": load.priority if load else None,
+            "power_sensor": load.power_sensor if load else None,
+            "manual_expected_kw": load.manual_expected_kw if load else None,
+            "expected_kw": self.coordinator.load_expected_kw(self._load_entity_id),
+            "min_required_kw": load.min_required_kw if load else None,
+            "threshold_reference_kw": self.coordinator.load_threshold_reference_kw(
+                self._load_entity_id
+            ),
+            "shed_by_controller": self.coordinator.is_load_shed(self._load_entity_id),
+            "external_override": self.coordinator.is_load_external_override(
+                self._load_entity_id
+            ),
+            "blocked_by_min_required_draw": self.coordinator.load_blocked_by_threshold(
+                self._load_entity_id
+            ),
+        }

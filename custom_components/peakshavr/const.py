@@ -39,6 +39,7 @@ CONF_LOAD_ENTITY_ID = "entity_id"
 CONF_LOAD_PRIORITY = "priority"
 CONF_LOAD_POWER_SENSOR = "power_sensor"
 CONF_LOAD_MANUAL_EXPECTED_KW = "manual_expected_kw"
+CONF_LOAD_MIN_REQUIRED_KW = "min_required_kw"
 CONF_LOAD_COOLDOWN_S = "cooldown_seconds"
 CONF_LOAD_MIN_ON_TIME_S = "min_on_time_seconds"
 

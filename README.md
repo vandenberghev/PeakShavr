@@ -49,6 +49,7 @@ PeakShavr is a Home Assistant custom integration for Belgian quarter-hour peak c
 - Per-load configuration:
   - priority (lower sheds first),
   - expected-power source (`power_sensor` or manual expected `kW`),
+  - minimum draw threshold (`kW`) to allow shedding in normal mode,
   - cooldown and minimum on-time.
 
 ## Exposed entities

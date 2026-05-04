@@ -21,8 +21,20 @@ def test_select_shed_plan_limits_to_one_outside_escalation() -> None:
         remaining_seconds=300,
         is_escalation=False,
         candidates=[
-            ShedCandidate("switch.a", priority=1, expected_kw=1.5, blocked_by_min_on_time=False),
-            ShedCandidate("switch.b", priority=2, expected_kw=1.5, blocked_by_min_on_time=False),
+            ShedCandidate(
+                "switch.a",
+                priority=1,
+                expected_kw=1.5,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=False,
+            ),
+            ShedCandidate(
+                "switch.b",
+                priority=2,
+                expected_kw=1.5,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=False,
+            ),
         ],
     )
     assert selected == ["switch.a"]
@@ -37,9 +49,27 @@ def test_select_shed_plan_can_shed_multiple_in_escalation() -> None:
         remaining_seconds=60,
         is_escalation=True,
         candidates=[
-            ShedCandidate("switch.a", priority=1, expected_kw=1.0, blocked_by_min_on_time=False),
-            ShedCandidate("switch.b", priority=2, expected_kw=1.0, blocked_by_min_on_time=False),
-            ShedCandidate("switch.c", priority=3, expected_kw=1.0, blocked_by_min_on_time=False),
+            ShedCandidate(
+                "switch.a",
+                priority=1,
+                expected_kw=1.0,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=False,
+            ),
+            ShedCandidate(
+                "switch.b",
+                priority=2,
+                expected_kw=1.0,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=False,
+            ),
+            ShedCandidate(
+                "switch.c",
+                priority=3,
+                expected_kw=1.0,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=False,
+            ),
         ],
     )
     assert selected == ["switch.a", "switch.b", "switch.c"]
@@ -110,7 +140,11 @@ def test_select_shed_plan_escalation_overrides_min_on_time() -> None:
         is_escalation=True,
         candidates=[
             ShedCandidate(
-                "switch.a", priority=1, expected_kw=2.5, blocked_by_min_on_time=True
+                "switch.a",
+                priority=1,
+                expected_kw=2.5,
+                blocked_by_min_on_time=True,
+                blocked_by_min_required_draw=False,
             ),
         ],
     )
@@ -128,7 +162,11 @@ def test_select_shed_plan_min_on_time_blocks_outside_escalation() -> None:
         is_escalation=False,
         candidates=[
             ShedCandidate(
-                "switch.a", priority=1, expected_kw=2.5, blocked_by_min_on_time=True
+                "switch.a",
+                priority=1,
+                expected_kw=2.5,
+                blocked_by_min_on_time=True,
+                blocked_by_min_required_draw=False,
             ),
         ],
     )
@@ -147,3 +185,45 @@ def test_select_shed_plan_returns_empty_when_no_candidates() -> None:
         candidates=[],
     )
     assert selected == []
+
+
+def test_select_shed_plan_min_required_threshold_blocks_outside_escalation() -> None:
+    selected = select_shed_plan(
+        projected_avg_kw=5.0,
+        target_kw=3.0,
+        used_kwh=0.5,
+        live_kw=4.0,
+        remaining_seconds=300,
+        is_escalation=False,
+        candidates=[
+            ShedCandidate(
+                "switch.a",
+                priority=1,
+                expected_kw=2.5,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=True,
+            ),
+        ],
+    )
+    assert selected == []
+
+
+def test_select_shed_plan_min_required_threshold_ignored_in_escalation() -> None:
+    selected = select_shed_plan(
+        projected_avg_kw=5.0,
+        target_kw=3.0,
+        used_kwh=0.5,
+        live_kw=4.0,
+        remaining_seconds=60,
+        is_escalation=True,
+        candidates=[
+            ShedCandidate(
+                "switch.a",
+                priority=1,
+                expected_kw=2.5,
+                blocked_by_min_on_time=False,
+                blocked_by_min_required_draw=True,
+            ),
+        ],
+    )
+    assert selected == ["switch.a"]

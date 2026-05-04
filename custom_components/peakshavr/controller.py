@@ -19,6 +19,7 @@ class ShedCandidate:
     priority: int
     expected_kw: float
     blocked_by_min_on_time: bool
+    blocked_by_min_required_draw: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -52,6 +53,8 @@ def select_shed_plan(
 
     for candidate in sorted(candidates, key=lambda item: (item.priority, item.entity_id)):
         if candidate.blocked_by_min_on_time and not is_escalation:
+            continue
+        if candidate.blocked_by_min_required_draw and not is_escalation:
             continue
 
         selected.append(candidate.entity_id)
@@ -98,4 +101,3 @@ def select_restore_candidate(
         if projected_with_load <= target_kw:
             return entity_id
     return None
-

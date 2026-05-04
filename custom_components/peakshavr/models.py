@@ -9,6 +9,7 @@ from .const import (
     CONF_LOAD_COOLDOWN_S,
     CONF_LOAD_ENTITY_ID,
     CONF_LOAD_MANUAL_EXPECTED_KW,
+    CONF_LOAD_MIN_REQUIRED_KW,
     CONF_LOAD_MIN_ON_TIME_S,
     CONF_LOAD_POWER_SENSOR,
     CONF_LOAD_PRIORITY,
@@ -27,6 +28,7 @@ class LoadConfig:
     min_on_time_seconds: int = DEFAULT_LOAD_MIN_ON_TIME_SECONDS
     power_sensor: str | None = None
     manual_expected_kw: float | None = None
+    min_required_kw: float | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "LoadConfig":
@@ -46,6 +48,11 @@ class LoadConfig:
                 if data.get(CONF_LOAD_MANUAL_EXPECTED_KW) is not None
                 else None
             ),
+            min_required_kw=(
+                float(data[CONF_LOAD_MIN_REQUIRED_KW])
+                if data.get(CONF_LOAD_MIN_REQUIRED_KW) is not None
+                else None
+            ),
         )
 
     def as_mapping(self) -> dict[str, Any]:
@@ -57,5 +64,5 @@ class LoadConfig:
             CONF_LOAD_MIN_ON_TIME_S: self.min_on_time_seconds,
             CONF_LOAD_POWER_SENSOR: self.power_sensor,
             CONF_LOAD_MANUAL_EXPECTED_KW: self.manual_expected_kw,
+            CONF_LOAD_MIN_REQUIRED_KW: self.min_required_kw,
         }
-

@@ -27,6 +27,7 @@ from .const import (
     CONF_LOAD_COOLDOWN_S,
     CONF_LOAD_ENTITY_ID,
     CONF_LOAD_MANUAL_EXPECTED_KW,
+    CONF_LOAD_MIN_REQUIRED_KW,
     CONF_LOAD_MIN_ON_TIME_S,
     CONF_LOAD_POWER_SENSOR,
     CONF_LOAD_PRIORITY,
@@ -54,6 +55,7 @@ from .const import (
     NAME,
 )
 from .models import LoadConfig
+from .source_fields import normalize_source_fields, source_field_requirements
 from .validation import validate_energy_entity_state, validate_power_entity_state
 
 LOAD_MODE_SENSOR = "sensor"
@@ -70,13 +72,7 @@ class PeakShavrConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             errors = await _validate_source_input(self.hass, user_input)
             if not errors:
-                data = {
-                    CONF_POWER_SENSOR: user_input[CONF_POWER_SENSOR],
-                    CONF_ENERGY_MODE: user_input[CONF_ENERGY_MODE],
-                    CONF_ENERGY_SENSOR: user_input.get(CONF_ENERGY_SENSOR),
-                    CONF_ENERGY_SENSOR_DAY: user_input.get(CONF_ENERGY_SENSOR_DAY),
-                    CONF_ENERGY_SENSOR_NIGHT: user_input.get(CONF_ENERGY_SENSOR_NIGHT),
-                }
+                data = normalize_source_fields(user_input)
                 options = {
                     CONF_TARGET_KW: float(user_input[CONF_TARGET_KW]),
                     CONF_LOADS: [],
@@ -158,13 +154,7 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
             if not errors:
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
-                    data={
-                        CONF_POWER_SENSOR: user_input[CONF_POWER_SENSOR],
-                        CONF_ENERGY_MODE: user_input[CONF_ENERGY_MODE],
-                        CONF_ENERGY_SENSOR: user_input.get(CONF_ENERGY_SENSOR),
-                        CONF_ENERGY_SENSOR_DAY: user_input.get(CONF_ENERGY_SENSOR_DAY),
-                        CONF_ENERGY_SENSOR_NIGHT: user_input.get(CONF_ENERGY_SENSOR_NIGHT),
-                    },
+                    data=normalize_source_fields(user_input),
                 )
                 updated_options = dict(self._config_entry.options)
                 updated_options.update(
@@ -287,6 +277,7 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
             load_mode = user_input[CONF_MODE]
             power_sensor = user_input.get(CONF_LOAD_POWER_SENSOR)
             manual_kw = user_input.get(CONF_LOAD_MANUAL_EXPECTED_KW)
+            min_required_kw = user_input.get(CONF_LOAD_MIN_REQUIRED_KW)
             load_entity = user_input[CONF_LOAD_ENTITY_ID]
             load_domain = str(load_entity).split(".", 1)[0]
             if load_domain not in LOAD_SUPPORTED_DOMAINS:
@@ -298,6 +289,10 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "required"
             if load_mode == LOAD_MODE_MANUAL and manual_kw is not None and float(manual_kw) <= 0:
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "manual_kw_invalid"
+            if min_required_kw is None:
+                errors[CONF_LOAD_MIN_REQUIRED_KW] = "required"
+            elif float(min_required_kw) < 0:
+                errors[CONF_LOAD_MIN_REQUIRED_KW] = "min_required_kw_invalid"
             if load_mode == LOAD_MODE_SENSOR and power_sensor:
                 power_validation = validate_power_entity_state(
                     self.hass.states.get(power_sensor)
@@ -315,6 +310,7 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
                     manual_expected_kw=(
                         float(manual_kw) if load_mode == LOAD_MODE_MANUAL else None
                     ),
+                    min_required_kw=float(min_required_kw),
                     cooldown_seconds=int(user_input[CONF_LOAD_COOLDOWN_S]),
                     min_on_time_seconds=int(user_input[CONF_LOAD_MIN_ON_TIME_S]),
                 )
@@ -343,6 +339,9 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
             CONF_LOAD_POWER_SENSOR: existing.power_sensor if existing else None,
             CONF_LOAD_MANUAL_EXPECTED_KW: (
                 existing.manual_expected_kw if existing else None
+            ),
+            CONF_LOAD_MIN_REQUIRED_KW: (
+                existing.min_required_kw if existing else None
             ),
             CONF_LOAD_COOLDOWN_S: (
                 existing.cooldown_seconds
@@ -409,6 +408,17 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
                             mode=selector.NumberSelectorMode.BOX,
                         )
                     ),
+                    _required_with_optional_default(
+                        CONF_LOAD_MIN_REQUIRED_KW,
+                        defaults[CONF_LOAD_MIN_REQUIRED_KW],
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=30,
+                            step=0.1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
                     vol.Required(
                         CONF_LOAD_COOLDOWN_S,
                         default=defaults[CONF_LOAD_COOLDOWN_S],
@@ -462,6 +472,31 @@ def _source_schema(
     include_runtime: bool = False,
 ) -> vol.Schema:
     defaults = defaults or {}
+    require_total, require_split_day, require_split_night = source_field_requirements(
+        defaults
+    )
+    energy_sensor_key = _optional_with_default(
+        CONF_ENERGY_SENSOR, defaults.get(CONF_ENERGY_SENSOR)
+    )
+    energy_day_key = _optional_with_default(
+        CONF_ENERGY_SENSOR_DAY, defaults.get(CONF_ENERGY_SENSOR_DAY)
+    )
+    energy_night_key = _optional_with_default(
+        CONF_ENERGY_SENSOR_NIGHT, defaults.get(CONF_ENERGY_SENSOR_NIGHT)
+    )
+    if require_total:
+        energy_sensor_key = _required_with_optional_default(
+            CONF_ENERGY_SENSOR, defaults.get(CONF_ENERGY_SENSOR)
+        )
+    if require_split_day:
+        energy_day_key = _required_with_optional_default(
+            CONF_ENERGY_SENSOR_DAY, defaults.get(CONF_ENERGY_SENSOR_DAY)
+        )
+    if require_split_night:
+        energy_night_key = _required_with_optional_default(
+            CONF_ENERGY_SENSOR_NIGHT, defaults.get(CONF_ENERGY_SENSOR_NIGHT)
+        )
+
     schema: dict[Any, Any] = {
         vol.Required(
             CONF_POWER_SENSOR,
@@ -485,18 +520,15 @@ def _source_schema(
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         ),
-        vol.Optional(
-            CONF_ENERGY_SENSOR,
-            default=defaults.get(CONF_ENERGY_SENSOR),
-        ): selector.EntitySelector(selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])),
-        vol.Optional(
-            CONF_ENERGY_SENSOR_DAY,
-            default=defaults.get(CONF_ENERGY_SENSOR_DAY),
-        ): selector.EntitySelector(selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])),
-        vol.Optional(
-            CONF_ENERGY_SENSOR_NIGHT,
-            default=defaults.get(CONF_ENERGY_SENSOR_NIGHT),
-        ): selector.EntitySelector(selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])),
+        energy_sensor_key: selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])
+        ),
+        energy_day_key: selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])
+        ),
+        energy_night_key: selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])
+        ),
         vol.Required(
             CONF_TARGET_KW,
             default=defaults.get(CONF_TARGET_KW, DEFAULT_TARGET_KW),
@@ -671,3 +703,15 @@ def _current_loads(config_entry: ConfigEntry) -> list[LoadConfig]:
             continue
         loads.append(LoadConfig.from_mapping(dict(raw)))
     return sorted(loads, key=lambda load: (load.priority, load.entity_id))
+
+
+def _optional_with_default(field: str, default: Any) -> Any:
+    if default is None:
+        return vol.Optional(field)
+    return vol.Optional(field, default=default)
+
+
+def _required_with_optional_default(field: str, default: Any) -> Any:
+    if default is None:
+        return vol.Required(field)
+    return vol.Required(field, default=default)
