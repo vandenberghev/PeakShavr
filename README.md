@@ -20,7 +20,7 @@ PeakShavr is a Home Assistant custom integration for Belgian quarter-hour peak c
 
 ## Home Assistant requirements
 
-- Home Assistant `2025.1.0` or newer
+- Home Assistant `2026.1.0` or newer
 - A power sensor and energy sensor(s) with valid metadata:
   - power: numeric `W` or `kW`
   - energy: numeric `Wh` / `kWh` / `MWh` with `state_class` `total` or `total_increasing`
