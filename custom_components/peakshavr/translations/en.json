@@ -1,0 +1,146 @@
+{
+  "title": "PeakShavr",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up PeakShavr",
+        "description": "Configure source sensors and target peak limit.",
+        "data": {
+          "power_sensor": "Live grid power sensor",
+          "energy_mode": "Energy source mode",
+          "energy_sensor": "Cumulative energy import sensor",
+          "energy_sensor_day": "Day cumulative energy import sensor",
+          "energy_sensor_night": "Night cumulative energy import sensor",
+          "target_kw": "Target peak (kW)"
+        }
+      }
+    },
+    "error": {
+      "required": "Required field",
+      "power_unavailable": "Power sensor is unavailable",
+      "power_unit_invalid": "Power sensor must report W or kW",
+      "power_non_numeric": "Power sensor state must be numeric",
+      "energy_unavailable": "Energy sensor is unavailable",
+      "energy_unit_invalid": "Energy sensor must report Wh, kWh, or MWh",
+      "energy_state_class_invalid": "Energy sensor must be total or total_increasing",
+      "energy_non_numeric": "Energy sensor state must be numeric",
+      "invalid_load_domain": "Managed load must be a switch or input_boolean",
+      "manual_kw_invalid": "Manual expected kW must be greater than zero",
+      "invalid_sensor": "Selected sensor is invalid"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PeakShavr options",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "global": {
+        "title": "Global settings",
+        "data": {
+          "power_sensor": "Live grid power sensor",
+          "energy_mode": "Energy source mode",
+          "energy_sensor": "Cumulative energy import sensor",
+          "energy_sensor_day": "Day cumulative energy import sensor",
+          "energy_sensor_night": "Night cumulative energy import sensor",
+          "target_kw": "Target peak (kW)",
+          "enabled": "Controller enabled",
+          "telemetry_silence_seconds": "Telemetry silence threshold (s)",
+          "telemetry_conflict_abs_kw": "Telemetry conflict absolute threshold (kW)",
+          "telemetry_conflict_rel": "Telemetry conflict relative threshold",
+          "override_backoff_seconds": "External override backoff (s)",
+          "normal_interval_seconds": "Normal control interval (s)",
+          "escalation_interval_seconds": "Escalation control interval (s)",
+          "escalation_window_seconds": "Escalation window (s)"
+        }
+      },
+      "add_load": {
+        "title": "Add load",
+        "data": {
+          "entity_id": "Load entity",
+          "priority": "Priority (lower sheds first)",
+          "mode": "Expected power source",
+          "power_sensor": "Load power sensor",
+          "manual_expected_kw": "Manual expected load draw (kW)",
+          "cooldown_seconds": "Cooldown after shed (s)",
+          "min_on_time_seconds": "Minimum on-time after restore (s)"
+        }
+      },
+      "edit_load": {
+        "title": "Edit load",
+        "data": {
+          "entity_id": "Load entity",
+          "priority": "Priority (lower sheds first)",
+          "mode": "Expected power source",
+          "power_sensor": "Load power sensor",
+          "manual_expected_kw": "Manual expected load draw (kW)",
+          "cooldown_seconds": "Cooldown after shed (s)",
+          "min_on_time_seconds": "Minimum on-time after restore (s)"
+        }
+      },
+      "select_load_edit": {
+        "title": "Select load to edit",
+        "data": {
+          "load": "Load"
+        }
+      },
+      "select_load_remove": {
+        "title": "Select load to remove",
+        "data": {
+          "load": "Load"
+        }
+      },
+      "remove_load_confirm": {
+        "title": "Remove load",
+        "description": "Remove {load} from managed loads?"
+      }
+    },
+    "error": {
+      "required": "Required field",
+      "power_unavailable": "Power sensor is unavailable",
+      "power_unit_invalid": "Power sensor must report W or kW",
+      "power_non_numeric": "Power sensor state must be numeric",
+      "energy_unavailable": "Energy sensor is unavailable",
+      "energy_unit_invalid": "Energy sensor must report Wh, kWh, or MWh",
+      "energy_state_class_invalid": "Energy sensor must be total or total_increasing",
+      "energy_non_numeric": "Energy sensor state must be numeric",
+      "invalid_load_domain": "Managed load must be a switch or input_boolean",
+      "manual_kw_invalid": "Manual expected kW must be greater than zero",
+      "invalid_sensor": "Selected sensor is invalid"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "projected_avg_kw": {
+        "name": "Projected quarter-end average"
+      },
+      "headroom_kw": {
+        "name": "Headroom"
+      },
+      "monthly_peak_kw": {
+        "name": "Estimated monthly peak"
+      },
+      "active_shed_count": {
+        "name": "Active shed count"
+      },
+      "last_action": {
+        "name": "Last action"
+      }
+    },
+    "binary_sensor": {
+      "escalation": {
+        "name": "Escalation mode"
+      },
+      "degraded": {
+        "name": "Degraded mode"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "name": "Enabled"
+      }
+    }
+  }
+}
