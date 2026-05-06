@@ -25,6 +25,7 @@ from .const import (
     CONF_ESCALATION_WINDOW_SECONDS,
     CONF_LOAD_COOLDOWN_S,
     CONF_LOAD_ENTITY_ID,
+    CONF_LOAD_EXPECTED_SOURCE_MODE,
     CONF_LOAD_MANUAL_EXPECTED_KW,
     CONF_LOAD_MIN_REQUIRED_KW,
     CONF_LOAD_MIN_ON_TIME_S,
@@ -53,20 +54,23 @@ from .const import (
     LOAD_SUPPORTED_DOMAINS,
     NAME,
     SUBENTRY_TYPE_LOAD,
+    LOAD_EXPECTED_SOURCE_MANUAL,
+    LOAD_EXPECTED_SOURCE_SENSOR,
 )
+from .load_subentry import format_load_subentry_title
 from .models import LoadConfig
 from .number_utils import format_optional_kw, parse_localized_float
 from .source_fields import normalize_source_fields, source_field_requirements
 from .validation import validate_energy_entity_state, validate_power_entity_state
 
-LOAD_MODE_SENSOR = "sensor"
-LOAD_MODE_MANUAL = "manual"
+LOAD_MODE_SENSOR = LOAD_EXPECTED_SOURCE_SENSOR
+LOAD_MODE_MANUAL = LOAD_EXPECTED_SOURCE_MANUAL
 
 
 class PeakShavrConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle config flow for PeakShavr."""
 
-    VERSION = 2
+    VERSION = 3
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -234,7 +238,8 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             load_mode = user_input[CONF_MODE]
             power_sensor = user_input.get(CONF_LOAD_POWER_SENSOR)
-            manual_kw = parse_localized_float(user_input.get(CONF_LOAD_MANUAL_EXPECTED_KW))
+            raw_manual_kw = user_input.get(CONF_LOAD_MANUAL_EXPECTED_KW)
+            manual_kw = parse_localized_float(raw_manual_kw)
             min_required_kw = parse_localized_float(user_input.get(CONF_LOAD_MIN_REQUIRED_KW))
             load_entity = user_input[CONF_LOAD_ENTITY_ID]
             load_domain = str(load_entity).split(".", 1)[0]
@@ -248,19 +253,41 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
             ):
                 errors["base"] = "already_configured"
 
-            if load_mode == LOAD_MODE_SENSOR and not power_sensor:
+            persisted_power_sensor = (
+                power_sensor
+                if power_sensor is not None
+                else existing.power_sensor
+                if existing
+                else None
+            )
+            manual_kw_supplied = not _is_blank(raw_manual_kw)
+            persisted_manual_kw = (
+                manual_kw
+                if manual_kw_supplied and manual_kw is not None
+                else existing.manual_expected_kw
+                if existing
+                else None
+            )
+
+            if load_mode == LOAD_MODE_SENSOR and not persisted_power_sensor:
                 errors[CONF_LOAD_POWER_SENSOR] = "required"
-            if load_mode == LOAD_MODE_MANUAL and manual_kw is None:
+            if load_mode == LOAD_MODE_MANUAL and persisted_manual_kw is None:
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "required"
-            if load_mode == LOAD_MODE_MANUAL and manual_kw is not None and manual_kw <= 0:
+            if load_mode == LOAD_MODE_MANUAL and manual_kw_supplied and manual_kw is None:
+                errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "manual_kw_invalid"
+            if (
+                load_mode == LOAD_MODE_MANUAL
+                and persisted_manual_kw is not None
+                and persisted_manual_kw <= 0
+            ):
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "manual_kw_invalid"
             if min_required_kw is None:
                 errors[CONF_LOAD_MIN_REQUIRED_KW] = "required"
             elif min_required_kw < 0:
                 errors[CONF_LOAD_MIN_REQUIRED_KW] = "min_required_kw_invalid"
-            if load_mode == LOAD_MODE_SENSOR and power_sensor:
+            if load_mode == LOAD_MODE_SENSOR and persisted_power_sensor:
                 power_validation = validate_power_entity_state(
-                    self.hass.states.get(power_sensor)
+                    self.hass.states.get(persisted_power_sensor)
                 )
                 if not power_validation.ok:
                     errors[CONF_LOAD_POWER_SENSOR] = (
@@ -271,17 +298,18 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
                 load_data = {
                     CONF_LOAD_ENTITY_ID: load_entity,
                     CONF_LOAD_PRIORITY: int(user_input[CONF_LOAD_PRIORITY]),
-                    CONF_LOAD_POWER_SENSOR: (
-                        power_sensor if load_mode == LOAD_MODE_SENSOR else None
-                    ),
-                    CONF_LOAD_MANUAL_EXPECTED_KW: (
-                        manual_kw if load_mode == LOAD_MODE_MANUAL else None
-                    ),
+                    CONF_LOAD_POWER_SENSOR: persisted_power_sensor,
+                    CONF_LOAD_MANUAL_EXPECTED_KW: persisted_manual_kw,
+                    CONF_LOAD_EXPECTED_SOURCE_MODE: load_mode,
                     CONF_LOAD_MIN_REQUIRED_KW: min_required_kw,
                     CONF_LOAD_COOLDOWN_S: int(user_input[CONF_LOAD_COOLDOWN_S]),
                     CONF_LOAD_MIN_ON_TIME_S: int(user_input[CONF_LOAD_MIN_ON_TIME_S]),
                 }
-                title = _load_title(self.hass, load_entity)
+                title = _load_subentry_title(
+                    self.hass,
+                    load_entity,
+                    int(user_input[CONF_LOAD_PRIORITY]),
+                )
                 if subentry is None:
                     return self.async_create_entry(
                         title=title, data=load_data, unique_id=load_entity
@@ -329,7 +357,7 @@ def _load_editor_defaults(existing: LoadConfig | None) -> dict[str, Any]:
     return {
         CONF_LOAD_ENTITY_ID: existing.entity_id if existing else None,
         CONF_LOAD_PRIORITY: existing.priority if existing else 100,
-        CONF_MODE: default_mode,
+        CONF_MODE: existing.expected_source_mode if existing else default_mode,
         CONF_LOAD_POWER_SENSOR: existing.power_sensor if existing else None,
         CONF_LOAD_MANUAL_EXPECTED_KW: (
             format_optional_kw(existing.manual_expected_kw) if existing else None
@@ -408,11 +436,21 @@ def _load_editor_schema() -> vol.Schema:
     )
 
 
-def _load_title(hass: HomeAssistant, load_entity_id: str) -> str:
+def _load_subentry_title(
+    hass: HomeAssistant, load_entity_id: str, priority: int
+) -> str:
+    return format_load_subentry_title(priority, _load_display_name(hass, load_entity_id))
+
+
+def _load_display_name(hass: HomeAssistant, load_entity_id: str) -> str:
     state = hass.states.get(load_entity_id)
     if state is not None and state.name:
         return state.name
     return load_entity_id
+
+
+def _is_blank(value: object | None) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
 
 
 def _source_schema(

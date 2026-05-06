@@ -15,6 +15,8 @@ from .const import DOMAIN, NAME
 from .coordinator import PeakShavrCoordinator
 from .entity_helpers import load_device_info, load_key
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

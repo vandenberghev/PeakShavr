@@ -7,7 +7,14 @@ import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from .const import CONF_LOAD_ENTITY_ID, CONF_LOADS, DOMAIN, PLATFORMS, SUBENTRY_TYPE_LOAD
+from .const import (
+    CONF_LOAD_ENTITY_ID,
+    CONF_LOADS,
+    DOMAIN,
+    PLATFORMS,
+    SUBENTRY_TYPE_LOAD,
+)
+from .load_subentry import format_load_subentry_title, load_display_name_from_title
 from .models import LoadConfig
 
 if TYPE_CHECKING:
@@ -23,12 +30,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate config entry to subentry-backed load storage."""
     from homeassistant.config_entries import ConfigSubentry
 
-    if entry.version > 2:
+    if entry.version > 3:
         _LOGGER.error("Cannot migrate %s config entry version %s", DOMAIN, entry.version)
         return False
 
-    if entry.version < 2:
-        _LOGGER.debug("Migrating %s config entry %s to version 2", DOMAIN, entry.entry_id)
+    if entry.version < 3:
+        _LOGGER.debug("Migrating %s config entry %s to version 3", DOMAIN, entry.entry_id)
 
     options = dict(entry.options)
     raw_option_loads = options.get(CONF_LOADS, [])
@@ -51,17 +58,38 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 entry,
                 ConfigSubentry(
                     subentry_type=SUBENTRY_TYPE_LOAD,
-                    title=load.entity_id,
+                    title=format_load_subentry_title(load.priority, load.entity_id),
                     unique_id=load.entity_id,
                     data=MappingProxyType(load.as_mapping()),
                 ),
             )
             known_load_ids.add(load.entity_id)
 
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_LOAD:
+            continue
+        load = LoadConfig.from_mapping(dict(subentry.data))
+        display_name = load_display_name_from_title(subentry.title, load.entity_id)
+        normalized_title = format_load_subentry_title(load.priority, display_name)
+        normalized_data = load.as_mapping()
+        if (
+            subentry.title == normalized_title
+            and dict(subentry.data) == normalized_data
+            and subentry.unique_id == load.entity_id
+        ):
+            continue
+        hass.config_entries.async_update_subentry(
+            entry=entry,
+            subentry=subentry,
+            title=normalized_title,
+            data=normalized_data,
+            unique_id=load.entity_id,
+        )
+
     if raw_option_loads:
         options.pop(CONF_LOADS, None)
 
-    hass.config_entries.async_update_entry(entry, version=2, options=options)
+    hass.config_entries.async_update_entry(entry, version=3, options=options)
     return True
 
 
@@ -83,10 +111,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .coordinator import PeakShavrCoordinator
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    coordinator: PeakShavrCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-    await coordinator.async_shutdown()
-    if not hass.data[DOMAIN]:
-        hass.data.pop(DOMAIN)
+    if unload_ok:
+        coordinator: PeakShavrCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_shutdown()
+        if not hass.data[DOMAIN]:
+            hass.data.pop(DOMAIN)
     return unload_ok
 
 

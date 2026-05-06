@@ -15,6 +15,8 @@ from .const import DOMAIN, NAME
 from .coordinator import PeakShavrCoordinator
 from .entity_helpers import load_device_info, load_key
 
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -98,6 +100,7 @@ class PeakShavrManagedLoadSwitch(CoordinatorEntity[PeakShavrCoordinator], Switch
         return {
             "managed_entity_id": self._load_entity_id,
             "priority": load.priority if load else None,
+            "expected_source_mode": load.expected_source_mode if load else None,
             "power_sensor": load.power_sensor if load else None,
             "manual_expected_kw": load.manual_expected_kw if load else None,
             "min_required_kw": load.min_required_kw if load else None,

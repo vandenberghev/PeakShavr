@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections import deque
 from statistics import quantiles
 
-from .const import DEFAULT_LOAD_EXPECTED_KW
+from .const import (
+    DEFAULT_LOAD_EXPECTED_KW,
+    LOAD_EXPECTED_SOURCE_MANUAL,
+    LOAD_EXPECTED_SOURCE_SENSOR,
+)
 
 
 class RollingLoadStats:
@@ -43,13 +47,24 @@ def resolve_expected_load_kw(
     manual_expected_kw: float | None,
     live_sensor_kw: float | None,
     stats_p90_kw: float | None,
+    expected_source_mode: str,
 ) -> float:
     """Resolve conservative expected draw in kW for control decisions."""
-    if manual_expected_kw is not None and manual_expected_kw > 0:
-        return manual_expected_kw
+    if expected_source_mode == LOAD_EXPECTED_SOURCE_MANUAL:
+        if manual_expected_kw is not None and manual_expected_kw > 0:
+            return manual_expected_kw
+        if stats_p90_kw is not None and stats_p90_kw > 0:
+            return stats_p90_kw
+        if live_sensor_kw is not None and live_sensor_kw > 0:
+            return live_sensor_kw
+        return DEFAULT_LOAD_EXPECTED_KW
+
+    if expected_source_mode != LOAD_EXPECTED_SOURCE_SENSOR:
+        # Backward-safe fallback.
+        expected_source_mode = LOAD_EXPECTED_SOURCE_SENSOR
+
     if stats_p90_kw is not None and stats_p90_kw > 0:
         return stats_p90_kw
     if live_sensor_kw is not None and live_sensor_kw > 0:
         return live_sensor_kw
     return DEFAULT_LOAD_EXPECTED_KW
-

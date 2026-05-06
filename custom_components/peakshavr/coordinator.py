@@ -19,7 +19,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, EventStateChangedData, EventStateReportedData, HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_state_report_event,
@@ -681,16 +681,22 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
             self._last_action = "target exceeded but no shed candidate available"
             return
 
-        for entity_id in planned_sheds:
-            await self._async_call_load_service(entity_id, turn_on=False)
-            if entity_id not in self._shed_stack:
-                self._shed_stack.append(entity_id)
-            self._last_shed_at[entity_id] = now
-            self._external_overrides.discard(entity_id)
-
-        self._last_action = (
-            f"shed {len(planned_sheds)} load(s): {', '.join(planned_sheds)}"
+        successful_sheds, failed_sheds = await self._async_apply_shed_actions(
+            now=now, planned_sheds=planned_sheds
         )
+        if successful_sheds and failed_sheds:
+            self._last_action = (
+                f"shed {len(successful_sheds)} load(s): {', '.join(successful_sheds)}; "
+                f"{len(failed_sheds)} action(s) failed"
+            )
+            return
+        if successful_sheds:
+            self._last_action = (
+                f"shed {len(successful_sheds)} load(s): {', '.join(successful_sheds)}"
+            )
+            return
+
+        self._last_action = "target exceeded but shed service calls failed"
 
     async def _async_run_restore_cycle(
         self,
@@ -736,22 +742,49 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
                 self._last_action = "restore frozen due to degraded telemetry"
             return
 
-        await self._async_call_load_service(restore_entity, turn_on=True)
+        try:
+            await self._async_call_load_service(restore_entity, turn_on=True)
+        except HomeAssistantError:
+            self._last_action = f"restore failed for {restore_entity}"
+            return
         self._shed_stack = [item for item in self._shed_stack if item != restore_entity]
         self._last_restore_at[restore_entity] = now
         self._last_action = f"restored {restore_entity}"
+
+    async def _async_apply_shed_actions(
+        self, *, now: datetime, planned_sheds: list[str]
+    ) -> tuple[list[str], list[str]]:
+        successful_sheds: list[str] = []
+        failed_sheds: list[str] = []
+        for entity_id in planned_sheds:
+            try:
+                await self._async_call_load_service(entity_id, turn_on=False)
+            except HomeAssistantError:
+                failed_sheds.append(entity_id)
+                continue
+            if entity_id not in self._shed_stack:
+                self._shed_stack.append(entity_id)
+            self._last_shed_at[entity_id] = now
+            self._external_overrides.discard(entity_id)
+            successful_sheds.append(entity_id)
+        return successful_sheds, failed_sheds
 
     async def _async_call_load_service(self, entity_id: str, *, turn_on: bool) -> None:
         domain = entity_id.split(".", 1)[0]
         service = SERVICE_TURN_ON if turn_on else SERVICE_TURN_OFF
         expected_state = STATE_ON if turn_on else STATE_OFF
         self._pending_service_actions[entity_id] = (expected_state, dt_util.utcnow())
-        await self.hass.services.async_call(
-            domain,
-            service,
-            {ATTR_ENTITY_ID: entity_id},
-            blocking=True,
-        )
+        try:
+            await self.hass.services.async_call(
+                domain,
+                service,
+                {ATTR_ENTITY_ID: entity_id},
+                blocking=True,
+            )
+        except HomeAssistantError:
+            self._pending_service_actions.pop(entity_id, None)
+            _LOGGER.warning("Service call failed for %s (%s.%s)", entity_id, domain, service)
+            raise
 
     def _resolve_expected_kw(self, load: LoadConfig) -> float:
         sensor_kw: float | None = None
@@ -766,6 +799,7 @@ class PeakShavrCoordinator(DataUpdateCoordinator[None]):
             manual_expected_kw=load.manual_expected_kw,
             live_sensor_kw=sensor_kw,
             stats_p90_kw=stats_p90,
+            expected_source_mode=load.expected_source_mode,
         )
 
     def _capture_load_power_samples(self) -> None:

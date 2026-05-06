@@ -5,11 +5,14 @@ from __future__ import annotations
 from custom_components.peakshavr.const import (
     CONF_LOAD_COOLDOWN_S,
     CONF_LOAD_ENTITY_ID,
+    CONF_LOAD_EXPECTED_SOURCE_MODE,
     CONF_LOAD_MANUAL_EXPECTED_KW,
     CONF_LOAD_MIN_ON_TIME_S,
     CONF_LOAD_MIN_REQUIRED_KW,
     CONF_LOAD_POWER_SENSOR,
     CONF_LOAD_PRIORITY,
+    LOAD_EXPECTED_SOURCE_MANUAL,
+    LOAD_EXPECTED_SOURCE_SENSOR,
 )
 from custom_components.peakshavr.models import LoadConfig
 
@@ -27,9 +30,11 @@ def test_load_config_roundtrip_includes_min_required_kw() -> None:
     load = LoadConfig.from_mapping(raw)
     assert load.min_required_kw == 0.7
     assert load.manual_expected_kw == 1.8
+    assert load.expected_source_mode == LOAD_EXPECTED_SOURCE_SENSOR
     assert load.config_subentry_id is None
     assert load.as_mapping()[CONF_LOAD_MIN_REQUIRED_KW] == 0.7
     assert load.as_mapping()[CONF_LOAD_MANUAL_EXPECTED_KW] == 1.8
+    assert load.as_mapping()[CONF_LOAD_EXPECTED_SOURCE_MODE] == LOAD_EXPECTED_SOURCE_SENSOR
 
 
 def test_load_config_defaults_to_none_min_required_kw() -> None:
@@ -40,6 +45,19 @@ def test_load_config_defaults_to_none_min_required_kw() -> None:
         }
     )
     assert load.min_required_kw is None
+    assert load.expected_source_mode == LOAD_EXPECTED_SOURCE_SENSOR
+
+
+def test_load_config_infers_manual_mode_from_legacy_data() -> None:
+    load = LoadConfig.from_mapping(
+        {
+            CONF_LOAD_ENTITY_ID: "switch.boiler",
+            CONF_LOAD_PRIORITY: 1,
+            CONF_LOAD_MANUAL_EXPECTED_KW: 1.2,
+            CONF_LOAD_POWER_SENSOR: None,
+        }
+    )
+    assert load.expected_source_mode == LOAD_EXPECTED_SOURCE_MANUAL
 
 
 def test_load_config_does_not_serialize_subentry_id() -> None:

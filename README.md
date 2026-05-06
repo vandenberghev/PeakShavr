@@ -36,6 +36,7 @@ PeakShavr is a Home Assistant custom integration for Belgian quarter-hour peak c
 
 ### Initial setup
 
+- PeakShavr supports a single top-level controller entry.
 - Select live power sensor.
 - Select energy source mode:
   - single cumulative sensor, or
@@ -48,9 +49,20 @@ PeakShavr is a Home Assistant custom integration for Belgian quarter-hour peak c
 - Manage loads from the integration screen using **Add load** and per-load **Configure** actions.
 - Per-load configuration:
   - priority (lower sheds first),
+  - subentry titles include priority and are ordered by priority (`[P0001] ...`, `[P0002] ...`),
   - expected-power source (`power_sensor` or manual expected `kW`),
+  - manual expected `kW` is remembered when switching between sensor/manual source modes,
   - minimum draw threshold (`kW`) to allow shedding in normal mode,
   - cooldown and minimum on-time.
+
+## Branding images
+
+- This integration includes local brand placeholders in:
+  - `custom_components/peakshavr/brand/icon.png`
+  - `custom_components/peakshavr/brand/logo.png`
+- For Home Assistant `2026.3+`, local `brand/` assets are used directly.
+- For Home Assistant `2026.1`, integration branding visibility may still depend on brands CDN content.
+- To publish final branding broadly, submit matching domain assets to the Home Assistant brands repository.
 
 ## Exposed entities
 
