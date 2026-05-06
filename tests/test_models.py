@@ -26,8 +26,10 @@ def test_load_config_roundtrip_includes_min_required_kw() -> None:
     }
     load = LoadConfig.from_mapping(raw)
     assert load.min_required_kw == 0.7
+    assert load.manual_expected_kw == 1.8
     assert load.config_subentry_id is None
     assert load.as_mapping()[CONF_LOAD_MIN_REQUIRED_KW] == 0.7
+    assert load.as_mapping()[CONF_LOAD_MANUAL_EXPECTED_KW] == 1.8
 
 
 def test_load_config_defaults_to_none_min_required_kw() -> None:

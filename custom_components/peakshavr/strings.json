@@ -81,7 +81,7 @@
       },
       "abort": {
         "already_configured": "This load is already configured",
-        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+        "reconfigure_successful": "Load configuration updated"
       },
       "step": {
         "user": {

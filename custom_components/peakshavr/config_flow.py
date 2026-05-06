@@ -55,6 +55,7 @@ from .const import (
     SUBENTRY_TYPE_LOAD,
 )
 from .models import LoadConfig
+from .number_utils import format_optional_kw, parse_localized_float
 from .source_fields import normalize_source_fields, source_field_requirements
 from .validation import validate_energy_entity_state, validate_power_entity_state
 
@@ -233,8 +234,8 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             load_mode = user_input[CONF_MODE]
             power_sensor = user_input.get(CONF_LOAD_POWER_SENSOR)
-            manual_kw = user_input.get(CONF_LOAD_MANUAL_EXPECTED_KW)
-            min_required_kw = user_input.get(CONF_LOAD_MIN_REQUIRED_KW)
+            manual_kw = parse_localized_float(user_input.get(CONF_LOAD_MANUAL_EXPECTED_KW))
+            min_required_kw = parse_localized_float(user_input.get(CONF_LOAD_MIN_REQUIRED_KW))
             load_entity = user_input[CONF_LOAD_ENTITY_ID]
             load_domain = str(load_entity).split(".", 1)[0]
             if load_domain not in LOAD_SUPPORTED_DOMAINS:
@@ -251,11 +252,11 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
                 errors[CONF_LOAD_POWER_SENSOR] = "required"
             if load_mode == LOAD_MODE_MANUAL and manual_kw is None:
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "required"
-            if load_mode == LOAD_MODE_MANUAL and manual_kw is not None and float(manual_kw) <= 0:
+            if load_mode == LOAD_MODE_MANUAL and manual_kw is not None and manual_kw <= 0:
                 errors[CONF_LOAD_MANUAL_EXPECTED_KW] = "manual_kw_invalid"
             if min_required_kw is None:
                 errors[CONF_LOAD_MIN_REQUIRED_KW] = "required"
-            elif float(min_required_kw) < 0:
+            elif min_required_kw < 0:
                 errors[CONF_LOAD_MIN_REQUIRED_KW] = "min_required_kw_invalid"
             if load_mode == LOAD_MODE_SENSOR and power_sensor:
                 power_validation = validate_power_entity_state(
@@ -274,9 +275,9 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
                         power_sensor if load_mode == LOAD_MODE_SENSOR else None
                     ),
                     CONF_LOAD_MANUAL_EXPECTED_KW: (
-                        float(manual_kw) if load_mode == LOAD_MODE_MANUAL else None
+                        manual_kw if load_mode == LOAD_MODE_MANUAL else None
                     ),
-                    CONF_LOAD_MIN_REQUIRED_KW: float(min_required_kw),
+                    CONF_LOAD_MIN_REQUIRED_KW: min_required_kw,
                     CONF_LOAD_COOLDOWN_S: int(user_input[CONF_LOAD_COOLDOWN_S]),
                     CONF_LOAD_MIN_ON_TIME_S: int(user_input[CONF_LOAD_MIN_ON_TIME_S]),
                 }
@@ -295,7 +296,12 @@ class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
 
         return self.async_show_form(
             step_id="reconfigure" if subentry else "user",
-            data_schema=_load_editor_schema(_load_editor_defaults(existing)),
+            data_schema=self.add_suggested_values_to_schema(
+                data_schema=_load_editor_schema(),
+                suggested_values=user_input
+                if user_input is not None
+                else _load_editor_defaults(existing),
+            ),
             errors=errors,
         )
 
@@ -325,8 +331,12 @@ def _load_editor_defaults(existing: LoadConfig | None) -> dict[str, Any]:
         CONF_LOAD_PRIORITY: existing.priority if existing else 100,
         CONF_MODE: default_mode,
         CONF_LOAD_POWER_SENSOR: existing.power_sensor if existing else None,
-        CONF_LOAD_MANUAL_EXPECTED_KW: existing.manual_expected_kw if existing else None,
-        CONF_LOAD_MIN_REQUIRED_KW: existing.min_required_kw if existing else None,
+        CONF_LOAD_MANUAL_EXPECTED_KW: (
+            format_optional_kw(existing.manual_expected_kw) if existing else None
+        ),
+        CONF_LOAD_MIN_REQUIRED_KW: (
+            format_optional_kw(existing.min_required_kw) if existing else None
+        ),
         CONF_LOAD_COOLDOWN_S: (
             existing.cooldown_seconds if existing else DEFAULT_LOAD_COOLDOWN_SECONDS
         ),
@@ -336,19 +346,13 @@ def _load_editor_defaults(existing: LoadConfig | None) -> dict[str, Any]:
     }
 
 
-def _load_editor_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+def _load_editor_schema() -> vol.Schema:
     return vol.Schema(
         {
-            vol.Required(
-                CONF_LOAD_ENTITY_ID,
-                default=defaults[CONF_LOAD_ENTITY_ID],
-            ): selector.EntitySelector(
+            vol.Required(CONF_LOAD_ENTITY_ID): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=list(LOAD_SUPPORTED_DOMAINS))
             ),
-            vol.Required(
-                CONF_LOAD_PRIORITY,
-                default=defaults[CONF_LOAD_PRIORITY],
-            ): selector.NumberSelector(
+            vol.Required(CONF_LOAD_PRIORITY): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=1000,
@@ -356,7 +360,7 @@ def _load_editor_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
-            vol.Required(CONF_MODE, default=defaults[CONF_MODE]): selector.SelectSelector(
+            vol.Required(CONF_MODE): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(
@@ -371,36 +375,20 @@ def _load_editor_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(
-                CONF_LOAD_POWER_SENSOR,
-                default=defaults[CONF_LOAD_POWER_SENSOR],
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])),
-            vol.Optional(
-                CONF_LOAD_MANUAL_EXPECTED_KW,
-                default=defaults[CONF_LOAD_MANUAL_EXPECTED_KW],
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.1,
-                    max=30,
-                    step=0.1,
-                    mode=selector.NumberSelectorMode.BOX,
+            vol.Optional(CONF_LOAD_POWER_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])
+            ),
+            vol.Optional(CONF_LOAD_MANUAL_EXPECTED_KW): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
                 )
             ),
-            _required_with_optional_default(
-                CONF_LOAD_MIN_REQUIRED_KW,
-                defaults[CONF_LOAD_MIN_REQUIRED_KW],
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=30,
-                    step=0.1,
-                    mode=selector.NumberSelectorMode.BOX,
+            vol.Required(CONF_LOAD_MIN_REQUIRED_KW): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
                 )
             ),
-            vol.Required(
-                CONF_LOAD_COOLDOWN_S,
-                default=defaults[CONF_LOAD_COOLDOWN_S],
-            ): selector.NumberSelector(
+            vol.Required(CONF_LOAD_COOLDOWN_S): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=3600,
@@ -408,10 +396,7 @@ def _load_editor_schema(defaults: Mapping[str, Any]) -> vol.Schema:
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
-            vol.Required(
-                CONF_LOAD_MIN_ON_TIME_S,
-                default=defaults[CONF_LOAD_MIN_ON_TIME_S],
-            ): selector.NumberSelector(
+            vol.Required(CONF_LOAD_MIN_ON_TIME_S): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
                     max=3600,
