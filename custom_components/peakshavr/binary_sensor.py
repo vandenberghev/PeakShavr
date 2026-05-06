@@ -23,15 +23,24 @@ async def async_setup_entry(
 ) -> None:
     """Set up PeakShavr binary sensors."""
     coordinator: PeakShavrCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[BinarySensorEntity] = [
-        PeakShavrEscalationBinarySensor(coordinator, entry),
-        PeakShavrDegradedBinarySensor(coordinator, entry),
-    ]
-    entities.extend(
-        PeakShavrLoadShedBinarySensor(coordinator, entry, load.entity_id)
-        for load in coordinator.load_configs
+    async_add_entities(
+        [
+            PeakShavrEscalationBinarySensor(coordinator, entry),
+            PeakShavrDegradedBinarySensor(coordinator, entry),
+        ]
     )
-    async_add_entities(entities)
+
+    by_subentry: dict[str | None, list[BinarySensorEntity]] = {}
+    for load in coordinator.load_configs:
+        by_subentry.setdefault(load.config_subentry_id, []).append(
+            PeakShavrLoadShedBinarySensor(coordinator, entry, load.entity_id)
+        )
+
+    for subentry_id, entities in by_subentry.items():
+        if subentry_id is None:
+            async_add_entities(entities)
+            continue
+        async_add_entities(entities, config_subentry_id=subentry_id)
 
 
 class PeakShavrEscalationBinarySensor(

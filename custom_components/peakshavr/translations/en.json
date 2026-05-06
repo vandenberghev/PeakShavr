@@ -56,48 +56,6 @@
           "escalation_interval_seconds": "Escalation control interval (s)",
           "escalation_window_seconds": "Escalation window (s)"
         }
-      },
-      "add_load": {
-        "title": "Add load",
-        "data": {
-          "entity_id": "Load entity",
-          "priority": "Priority (lower sheds first)",
-          "mode": "Expected power source",
-          "power_sensor": "Load power sensor",
-          "manual_expected_kw": "Manual expected load draw (kW)",
-          "min_required_kw": "Minimum draw to allow shedding (kW)",
-          "cooldown_seconds": "Cooldown after shed (s)",
-          "min_on_time_seconds": "Minimum on-time after restore (s)"
-        }
-      },
-      "edit_load": {
-        "title": "Edit load",
-        "data": {
-          "entity_id": "Load entity",
-          "priority": "Priority (lower sheds first)",
-          "mode": "Expected power source",
-          "power_sensor": "Load power sensor",
-          "manual_expected_kw": "Manual expected load draw (kW)",
-          "min_required_kw": "Minimum draw to allow shedding (kW)",
-          "cooldown_seconds": "Cooldown after shed (s)",
-          "min_on_time_seconds": "Minimum on-time after restore (s)"
-        }
-      },
-      "select_load_edit": {
-        "title": "Select load to edit",
-        "data": {
-          "load": "Load"
-        }
-      },
-      "select_load_remove": {
-        "title": "Select load to remove",
-        "data": {
-          "load": "Load"
-        }
-      },
-      "remove_load_confirm": {
-        "title": "Remove load",
-        "description": "Remove {load} from managed loads?"
       }
     },
     "error": {
@@ -113,6 +71,57 @@
       "manual_kw_invalid": "Manual expected kW must be greater than zero",
       "min_required_kw_invalid": "Minimum draw threshold must be zero or greater",
       "invalid_sensor": "Selected sensor is invalid"
+    }
+  },
+  "config_subentries": {
+    "load": {
+      "entry_type": "load",
+      "initiate_flow": {
+        "user": "Add load"
+      },
+      "abort": {
+        "already_configured": "This load is already configured",
+        "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      },
+      "step": {
+        "user": {
+          "title": "Add load",
+          "data": {
+            "entity_id": "Load entity",
+            "priority": "Priority (lower sheds first)",
+            "mode": "Expected power source",
+            "power_sensor": "Load power sensor",
+            "manual_expected_kw": "Manual expected load draw (kW)",
+            "min_required_kw": "Minimum draw to allow shedding (kW)",
+            "cooldown_seconds": "Cooldown after shed (s)",
+            "min_on_time_seconds": "Minimum on-time after restore (s)"
+          }
+        },
+        "reconfigure": {
+          "title": "Configure load",
+          "data": {
+            "entity_id": "Load entity",
+            "priority": "Priority (lower sheds first)",
+            "mode": "Expected power source",
+            "power_sensor": "Load power sensor",
+            "manual_expected_kw": "Manual expected load draw (kW)",
+            "min_required_kw": "Minimum draw to allow shedding (kW)",
+            "cooldown_seconds": "Cooldown after shed (s)",
+            "min_on_time_seconds": "Minimum on-time after restore (s)"
+          }
+        }
+      },
+      "error": {
+        "required": "Required field",
+        "already_configured": "This load is already configured",
+        "power_unavailable": "Power sensor is unavailable",
+        "power_unit_invalid": "Power sensor must report W or kW",
+        "power_non_numeric": "Power sensor state must be numeric",
+        "invalid_load_domain": "Managed load must be a switch or input_boolean",
+        "manual_kw_invalid": "Manual expected kW must be greater than zero",
+        "min_required_kw_invalid": "Minimum draw threshold must be zero or greater",
+        "invalid_sensor": "Selected sensor is invalid"
+      }
     }
   },
   "entity": {

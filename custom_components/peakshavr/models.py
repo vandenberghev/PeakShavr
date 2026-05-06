@@ -29,6 +29,7 @@ class LoadConfig:
     power_sensor: str | None = None
     manual_expected_kw: float | None = None
     min_required_kw: float | None = None
+    config_subentry_id: str | None = None
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "LoadConfig":

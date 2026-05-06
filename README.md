@@ -45,7 +45,7 @@ PeakShavr is a Home Assistant custom integration for Belgian quarter-hour peak c
 ### Options flow
 
 - Edit global settings (target, telemetry thresholds, control intervals).
-- Add/edit/remove managed loads.
+- Manage loads from the integration screen using **Add load** and per-load **Configure** actions.
 - Per-load configuration:
   - priority (lower sheds first),
   - expected-power source (`power_sensor` or manual expected `kW`),

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
+from collections.abc import Mapping
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -31,6 +33,7 @@ from .const import (
     DEFAULT_TELEMETRY_CONFLICT_REL,
     DEFAULT_TELEMETRY_SILENCE_SECONDS,
     ENERGY_MODE_TOTAL,
+    SUBENTRY_TYPE_LOAD,
 )
 from .models import LoadConfig
 
@@ -68,17 +71,7 @@ class RuntimeConfig:
 def resolve_runtime_config(entry: ConfigEntry) -> RuntimeConfig:
     """Resolve merged config from data and options."""
     merged: dict[str, object] = {**entry.data, **entry.options}
-
-    loads = tuple(
-        sorted(
-            (
-                LoadConfig.from_mapping(load_data)
-                for load_data in merged.get(CONF_LOADS, [])
-                if isinstance(load_data, dict)
-            ),
-            key=lambda load: (load.priority, load.entity_id),
-        )
-    )
+    loads = _resolve_loads(entry, merged)
 
     return RuntimeConfig(
         power_sensor=str(merged[CONF_POWER_SENSOR]),
@@ -115,9 +108,31 @@ def resolve_runtime_config(entry: ConfigEntry) -> RuntimeConfig:
     )
 
 
+def _resolve_loads(entry: ConfigEntry, merged: Mapping[str, object]) -> tuple[LoadConfig, ...]:
+    subentry_loads: list[LoadConfig] = []
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_LOAD:
+            continue
+        subentry_loads.append(
+            replace(
+                LoadConfig.from_mapping(dict(subentry.data)),
+                config_subentry_id=subentry.subentry_id,
+            )
+        )
+
+    if subentry_loads:
+        return tuple(sorted(subentry_loads, key=lambda load: (load.priority, load.entity_id)))
+
+    option_loads = tuple(
+        LoadConfig.from_mapping(dict(load_data))
+        for load_data in merged.get(CONF_LOADS, [])
+        if isinstance(load_data, Mapping)
+    )
+    return tuple(sorted(option_loads, key=lambda load: (load.priority, load.entity_id)))
+
+
 def _as_optional_str(value: object | None) -> str | None:
     if value is None:
         return None
     value_as_str = str(value).strip()
     return value_as_str if value_as_str else None
-

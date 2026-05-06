@@ -26,6 +26,7 @@ def test_load_config_roundtrip_includes_min_required_kw() -> None:
     }
     load = LoadConfig.from_mapping(raw)
     assert load.min_required_kw == 0.7
+    assert load.config_subentry_id is None
     assert load.as_mapping()[CONF_LOAD_MIN_REQUIRED_KW] == 0.7
 
 
@@ -37,3 +38,12 @@ def test_load_config_defaults_to_none_min_required_kw() -> None:
         }
     )
     assert load.min_required_kw is None
+
+
+def test_load_config_does_not_serialize_subentry_id() -> None:
+    load = LoadConfig(
+        entity_id="switch.boiler",
+        priority=1,
+        config_subentry_id="abc123",
+    )
+    assert "config_subentry_id" not in load.as_mapping()

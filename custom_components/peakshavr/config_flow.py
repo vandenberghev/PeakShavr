@@ -9,9 +9,9 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentryFlow, SubentryFlowResult
 from homeassistant.const import CONF_MODE
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .config import resolve_runtime_config
@@ -23,7 +23,6 @@ from .const import (
     CONF_ENERGY_SENSOR_NIGHT,
     CONF_ESCALATION_INTERVAL_SECONDS,
     CONF_ESCALATION_WINDOW_SECONDS,
-    CONF_LOADS,
     CONF_LOAD_COOLDOWN_S,
     CONF_LOAD_ENTITY_ID,
     CONF_LOAD_MANUAL_EXPECTED_KW,
@@ -53,6 +52,7 @@ from .const import (
     ENERGY_MODE_TOTAL,
     LOAD_SUPPORTED_DOMAINS,
     NAME,
+    SUBENTRY_TYPE_LOAD,
 )
 from .models import LoadConfig
 from .source_fields import normalize_source_fields, source_field_requirements
@@ -65,7 +65,7 @@ LOAD_MODE_MANUAL = "manual"
 class PeakShavrConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle config flow for PeakShavr."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -75,7 +75,6 @@ class PeakShavrConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data = normalize_source_fields(user_input)
                 options = {
                     CONF_TARGET_KW: float(user_input[CONF_TARGET_KW]),
-                    CONF_LOADS: [],
                     CONF_ENABLED: True,
                     CONF_TELEMETRY_SILENCE_SECONDS: DEFAULT_TELEMETRY_SILENCE_SECONDS,
                     CONF_TELEMETRY_CONFLICT_ABS_KW: DEFAULT_TELEMETRY_CONFLICT_ABS_KW,
@@ -97,34 +96,28 @@ class PeakShavrConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry):
         return PeakShavrOptionsFlow(config_entry)
 
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Return supported subentry types for this integration."""
+        return {SUBENTRY_TYPE_LOAD: PeakShavrLoadSubentryFlow}
+
 
 class PeakShavrOptionsFlow(config_entries.OptionsFlow):
     """Options flow for PeakShavr."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
-        self._selected_load_id: str | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
-        loads = _current_loads(self._config_entry)
-        actions: dict[str, str] = {
-            "global": "Edit global settings",
-            "add_load": "Add load",
-        }
-        if loads:
-            actions["edit_load"] = "Edit load"
-            actions["remove_load"] = "Remove load"
+        actions: dict[str, str] = {"global": "Edit global settings"}
 
         if user_input is not None:
             action = user_input["action"]
             if action == "global":
                 return await self.async_step_global()
-            if action == "add_load":
-                return await self.async_step_add_load()
-            if action == "edit_load":
-                return await self.async_step_select_load_edit()
-            if action == "remove_load":
-                return await self.async_step_select_load_remove()
 
         return self.async_show_form(
             step_id="init",
@@ -210,69 +203,33 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_select_load_edit(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ):
-        return await self._async_step_select_load("edit", user_input)
+class PeakShavrLoadSubentryFlow(ConfigSubentryFlow):
+    """Config-subentry flow for managed load configuration."""
 
-    async def async_step_select_load_remove(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ):
-        return await self._async_step_select_load("remove", user_input)
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Handle creating a new managed-load subentry."""
+        return await self._async_step_load_editor(user_input=user_input, subentry=None)
 
-    async def _async_step_select_load(
-        self, mode: str, user_input: dict[str, Any] | None
-    ):
-        loads = _current_loads(self._config_entry)
-        if user_input is not None:
-            self._selected_load_id = user_input["load"]
-            if mode == "edit":
-                return await self.async_step_edit_load()
-            return await self.async_step_remove_load_confirm()
-
-        return self.async_show_form(
-            step_id="select_load_edit" if mode == "edit" else "select_load_remove",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("load"): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                selector.SelectOptionDict(
-                                    value=load.entity_id,
-                                    label=f"{load.entity_id} (priority {load.priority})",
-                                )
-                                for load in loads
-                            ],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Handle reconfiguring an existing managed-load subentry."""
+        return await self._async_step_load_editor(
+            user_input=user_input,
+            subentry=self._get_reconfigure_subentry(),
         )
-
-    async def async_step_add_load(self, user_input: dict[str, Any] | None = None):
-        return await self._async_step_load_editor(user_input=user_input, existing=None)
-
-    async def async_step_edit_load(self, user_input: dict[str, Any] | None = None):
-        existing = next(
-            (
-                load
-                for load in _current_loads(self._config_entry)
-                if load.entity_id == self._selected_load_id
-            ),
-            None,
-        )
-        return await self._async_step_load_editor(user_input=user_input, existing=existing)
 
     async def _async_step_load_editor(
         self,
         *,
         user_input: dict[str, Any] | None,
-        existing: LoadConfig | None,
-    ):
+        subentry,
+    ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
+        existing = LoadConfig.from_mapping(dict(subentry.data)) if subentry else None
+        config_entry = self._get_entry()
         if user_input is not None:
             load_mode = user_input[CONF_MODE]
             power_sensor = user_input.get(CONF_LOAD_POWER_SENSOR)
@@ -282,6 +239,13 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
             load_domain = str(load_entity).split(".", 1)[0]
             if load_domain not in LOAD_SUPPORTED_DOMAINS:
                 errors[CONF_LOAD_ENTITY_ID] = "invalid_load_domain"
+
+            existing_entity_subentry = _load_subentry_by_entity(config_entry, load_entity)
+            if existing_entity_subentry and (
+                subentry is None
+                or existing_entity_subentry.subentry_id != subentry.subentry_id
+            ):
+                errors["base"] = "already_configured"
 
             if load_mode == LOAD_MODE_SENSOR and not power_sensor:
                 errors[CONF_LOAD_POWER_SENSOR] = "required"
@@ -303,167 +267,167 @@ class PeakShavrOptionsFlow(config_entries.OptionsFlow):
                     )
 
             if not errors:
-                updated_load = LoadConfig(
-                    entity_id=load_entity,
-                    priority=int(user_input[CONF_LOAD_PRIORITY]),
-                    power_sensor=power_sensor if load_mode == LOAD_MODE_SENSOR else None,
-                    manual_expected_kw=(
+                load_data = {
+                    CONF_LOAD_ENTITY_ID: load_entity,
+                    CONF_LOAD_PRIORITY: int(user_input[CONF_LOAD_PRIORITY]),
+                    CONF_LOAD_POWER_SENSOR: (
+                        power_sensor if load_mode == LOAD_MODE_SENSOR else None
+                    ),
+                    CONF_LOAD_MANUAL_EXPECTED_KW: (
                         float(manual_kw) if load_mode == LOAD_MODE_MANUAL else None
                     ),
-                    min_required_kw=float(min_required_kw),
-                    cooldown_seconds=int(user_input[CONF_LOAD_COOLDOWN_S]),
-                    min_on_time_seconds=int(user_input[CONF_LOAD_MIN_ON_TIME_S]),
+                    CONF_LOAD_MIN_REQUIRED_KW: float(min_required_kw),
+                    CONF_LOAD_COOLDOWN_S: int(user_input[CONF_LOAD_COOLDOWN_S]),
+                    CONF_LOAD_MIN_ON_TIME_S: int(user_input[CONF_LOAD_MIN_ON_TIME_S]),
+                }
+                title = _load_title(self.hass, load_entity)
+                if subentry is None:
+                    return self.async_create_entry(
+                        title=title, data=load_data, unique_id=load_entity
+                    )
+                return self.async_update_and_abort(
+                    entry=config_entry,
+                    subentry=subentry,
+                    data=load_data,
+                    title=title,
+                    unique_id=load_entity,
                 )
-                loads = _current_loads(self._config_entry)
-                if existing:
-                    loads = [load for load in loads if load.entity_id != existing.entity_id]
-                loads = [load for load in loads if load.entity_id != updated_load.entity_id]
-                loads.append(updated_load)
-                loads = sorted(loads, key=lambda load: (load.priority, load.entity_id))
-
-                options = dict(self._config_entry.options)
-                options[CONF_LOADS] = [load.as_mapping() for load in loads]
-                return self.async_create_entry(title="", data=options)
-
-        default_mode = (
-            LOAD_MODE_SENSOR
-            if existing and existing.power_sensor
-            else LOAD_MODE_MANUAL
-            if existing and existing.manual_expected_kw is not None
-            else LOAD_MODE_SENSOR
-        )
-        defaults = {
-            CONF_LOAD_ENTITY_ID: existing.entity_id if existing else None,
-            CONF_LOAD_PRIORITY: existing.priority if existing else 100,
-            CONF_MODE: default_mode,
-            CONF_LOAD_POWER_SENSOR: existing.power_sensor if existing else None,
-            CONF_LOAD_MANUAL_EXPECTED_KW: (
-                existing.manual_expected_kw if existing else None
-            ),
-            CONF_LOAD_MIN_REQUIRED_KW: (
-                existing.min_required_kw if existing else None
-            ),
-            CONF_LOAD_COOLDOWN_S: (
-                existing.cooldown_seconds
-                if existing
-                else DEFAULT_LOAD_COOLDOWN_SECONDS
-            ),
-            CONF_LOAD_MIN_ON_TIME_S: (
-                existing.min_on_time_seconds
-                if existing
-                else DEFAULT_LOAD_MIN_ON_TIME_SECONDS
-            ),
-        }
 
         return self.async_show_form(
-            step_id="edit_load" if existing else "add_load",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_LOAD_ENTITY_ID,
-                        default=defaults[CONF_LOAD_ENTITY_ID],
-                    ): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=list(LOAD_SUPPORTED_DOMAINS))
-                    ),
-                    vol.Required(
-                        CONF_LOAD_PRIORITY,
-                        default=defaults[CONF_LOAD_PRIORITY],
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=1000,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Required(CONF_MODE, default=defaults[CONF_MODE]): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                selector.SelectOptionDict(
-                                    value=LOAD_MODE_SENSOR,
-                                    label="Use load power sensor",
-                                ),
-                                selector.SelectOptionDict(
-                                    value=LOAD_MODE_MANUAL,
-                                    label="Use manual expected kW",
-                                ),
-                            ],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_LOAD_POWER_SENSOR,
-                        default=defaults[CONF_LOAD_POWER_SENSOR],
-                    ): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])
-                    ),
-                    vol.Optional(
-                        CONF_LOAD_MANUAL_EXPECTED_KW,
-                        default=defaults[CONF_LOAD_MANUAL_EXPECTED_KW],
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0.1,
-                            max=30,
-                            step=0.1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    _required_with_optional_default(
-                        CONF_LOAD_MIN_REQUIRED_KW,
-                        defaults[CONF_LOAD_MIN_REQUIRED_KW],
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=30,
-                            step=0.1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Required(
-                        CONF_LOAD_COOLDOWN_S,
-                        default=defaults[CONF_LOAD_COOLDOWN_S],
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=3600,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                    vol.Required(
-                        CONF_LOAD_MIN_ON_TIME_S,
-                        default=defaults[CONF_LOAD_MIN_ON_TIME_S],
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=0,
-                            max=3600,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
-                    ),
-                }
-            ),
+            step_id="reconfigure" if subentry else "user",
+            data_schema=_load_editor_schema(_load_editor_defaults(existing)),
             errors=errors,
         )
 
-    async def async_step_remove_load_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ):
-        if user_input is not None:
-            loads = [
-                load
-                for load in _current_loads(self._config_entry)
-                if load.entity_id != self._selected_load_id
-            ]
-            options = dict(self._config_entry.options)
-            options[CONF_LOADS] = [load.as_mapping() for load in loads]
-            return self.async_create_entry(title="", data=options)
 
-        return self.async_show_form(
-            step_id="remove_load_confirm",
-            data_schema=vol.Schema({}),
-            description_placeholders={"load": self._selected_load_id or "unknown"},
-        )
+def _load_subentry_by_entity(config_entry: ConfigEntry, load_entity_id: str):
+    for subentry in config_entry.subentries.values():
+        if subentry.subentry_type != SUBENTRY_TYPE_LOAD:
+            continue
+        subentry_load_entity_id = subentry.data.get(CONF_LOAD_ENTITY_ID)
+        if isinstance(subentry_load_entity_id, str) and subentry_load_entity_id == load_entity_id:
+            return subentry
+        if subentry.unique_id == load_entity_id:
+            return subentry
+    return None
+
+
+def _load_editor_defaults(existing: LoadConfig | None) -> dict[str, Any]:
+    default_mode = (
+        LOAD_MODE_SENSOR
+        if existing and existing.power_sensor
+        else LOAD_MODE_MANUAL
+        if existing and existing.manual_expected_kw is not None
+        else LOAD_MODE_SENSOR
+    )
+    return {
+        CONF_LOAD_ENTITY_ID: existing.entity_id if existing else None,
+        CONF_LOAD_PRIORITY: existing.priority if existing else 100,
+        CONF_MODE: default_mode,
+        CONF_LOAD_POWER_SENSOR: existing.power_sensor if existing else None,
+        CONF_LOAD_MANUAL_EXPECTED_KW: existing.manual_expected_kw if existing else None,
+        CONF_LOAD_MIN_REQUIRED_KW: existing.min_required_kw if existing else None,
+        CONF_LOAD_COOLDOWN_S: (
+            existing.cooldown_seconds if existing else DEFAULT_LOAD_COOLDOWN_SECONDS
+        ),
+        CONF_LOAD_MIN_ON_TIME_S: (
+            existing.min_on_time_seconds if existing else DEFAULT_LOAD_MIN_ON_TIME_SECONDS
+        ),
+    }
+
+
+def _load_editor_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_LOAD_ENTITY_ID,
+                default=defaults[CONF_LOAD_ENTITY_ID],
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=list(LOAD_SUPPORTED_DOMAINS))
+            ),
+            vol.Required(
+                CONF_LOAD_PRIORITY,
+                default=defaults[CONF_LOAD_PRIORITY],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=1000,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(CONF_MODE, default=defaults[CONF_MODE]): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(
+                            value=LOAD_MODE_SENSOR,
+                            label="Use load power sensor",
+                        ),
+                        selector.SelectOptionDict(
+                            value=LOAD_MODE_MANUAL,
+                            label="Use manual expected kW",
+                        ),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_LOAD_POWER_SENSOR,
+                default=defaults[CONF_LOAD_POWER_SENSOR],
+            ): selector.EntitySelector(selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN])),
+            vol.Optional(
+                CONF_LOAD_MANUAL_EXPECTED_KW,
+                default=defaults[CONF_LOAD_MANUAL_EXPECTED_KW],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.1,
+                    max=30,
+                    step=0.1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            _required_with_optional_default(
+                CONF_LOAD_MIN_REQUIRED_KW,
+                defaults[CONF_LOAD_MIN_REQUIRED_KW],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=30,
+                    step=0.1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_LOAD_COOLDOWN_S,
+                default=defaults[CONF_LOAD_COOLDOWN_S],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_LOAD_MIN_ON_TIME_S,
+                default=defaults[CONF_LOAD_MIN_ON_TIME_S],
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=1,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+        }
+    )
+
+
+def _load_title(hass: HomeAssistant, load_entity_id: str) -> str:
+    state = hass.states.get(load_entity_id)
+    if state is not None and state.name:
+        return state.name
+    return load_entity_id
 
 
 def _source_schema(
@@ -694,15 +658,6 @@ async def _validate_source_input(
             errors[field] = energy_validation.error_key or "invalid_sensor"
 
     return errors
-
-
-def _current_loads(config_entry: ConfigEntry) -> list[LoadConfig]:
-    loads: list[LoadConfig] = []
-    for raw in config_entry.options.get(CONF_LOADS, []):
-        if not isinstance(raw, Mapping):
-            continue
-        loads.append(LoadConfig.from_mapping(dict(raw)))
-    return sorted(loads, key=lambda load: (load.priority, load.entity_id))
 
 
 def _optional_with_default(field: str, default: Any) -> Any:
