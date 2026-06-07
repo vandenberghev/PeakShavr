@@ -12,6 +12,5 @@
     "@vandenberghev"
   ],
   "iot_class": "local_push",
-  "requirements": [],
-  "homeassistant": "2026.1.0"
+  "requirements": []
 }
