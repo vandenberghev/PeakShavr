@@ -1,7 +1,7 @@
 {
   "domain": "peakshavr",
   "name": "PeakShavr",
-  "version": "0.1.0",
+  "version": "2026.6.0",
   "documentation": "https://github.com/vandenberghev/PeakShavr",
   "issue_tracker": "https://github.com/vandenberghev/PeakShavr/issues",
   "config_flow": true,
